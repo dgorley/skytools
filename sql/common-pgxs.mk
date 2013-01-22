@@ -5,17 +5,26 @@
 
 # Variables that are used when extensions are available
 Extension_data ?=
-Extension_data_built ?=
+Extension_data_built ?= $(EXTENSION)--$(EXT_VERSION).sql $(EXTENSION)--unpackaged--$(EXT_VERSION).sql
 Extension_regress ?=
 
 # Variables that are used when extensions are not available
 Contrib_data ?=
-Contrib_data_built ?=
+Contrib_data_built = $(EXTENSION).sql $(EXTENSION).upgrade.sql \
+		structure/newgrants_$(EXTENSION).sql \
+		structure/oldgrants_$(EXTENSION).sql
+
 Contrib_regress ?=
+
+EXT_VERSION ?=
+EXT_OLD_VERSIONS ?= 
+
+Extension_upgrade_files = $(if $(EXT_OLD_VERSIONS),$(foreach v,$(EXT_OLD_VERSIONS),$(EXTENSION)--$(v)--$(EXT_VERSION).sql))
+Extension_data_built += $(Extension_upgrade_files)
 
 # Should the Contrib* files installed (under ../contrib/)
 # even when extensions are available?
-Contrib_install_always ?= no
+Contrib_install_always ?= yes
 
 #
 # switch variables
@@ -34,12 +43,33 @@ override CONTRIB_TESTDB = regression
 REGRESS_OPTS = --load-language=plpgsql --dbname=$(CONTRIB_TESTDB)
 
 #
+# Calculate actual sql files
+#
+
+SQLS  = $(shell $(AWK) '/^\\i / { print $$2; }' structure/install.sql)
+FUNCS = $(shell $(AWK) '/^\\i / { print $$2; }' $(SQLS))
+SRCS = $(SQLS) $(FUNCS)
+
+#
 # load PGXS
 #
 
 PG_CONFIG ?= pg_config
 PGXS = $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
+
+# when compiling locally and with postgres without python,
+# the variable may be empty
+PYTHON := $(if $(PYTHON),$(PYTHON),python)
+
+#
+# common tools
+#
+
+NDOC = NaturalDocs
+NDOCARGS = -r -o html docs/html -p docs -i docs/sql
+CATSQL = $(PYTHON) ../../scripts/catsql.py
+GRANTFU = $(PYTHON) ../../scripts/grantfu.py
 
 #
 # build rules, in case Contrib data must be always installed
@@ -70,4 +100,40 @@ test: install
 ack:
 	cp results/*.out expected/
 
-.PHONY: test ack installdirs-old-contrib install-old-contrib
+cleandox:
+	rm -rf docs/html docs/Data docs/sql
+
+clean: cleandox
+
+.PHONY: test ack installdirs-old-contrib install-old-contrib cleandox dox
+
+#
+# common files
+#
+
+$(EXTENSION)--$(EXT_VERSION).sql: $(EXTENSION).sql structure/ext_postproc.sql
+	$(CATSQL) $^ > $@
+
+$(EXTENSION)--unpackaged--$(EXT_VERSION).sql: $(EXTENSION).upgrade.sql structure/ext_unpackaged.sql structure/ext_postproc.sql
+	$(CATSQL) $^ > $@
+
+$(EXTENSION).sql: $(SRCS)
+	$(CATSQL) structure/install.sql > $@
+
+$(EXTENSION).upgrade.sql: $(SRCS)
+	$(CATSQL) structure/upgrade.sql > $@
+
+ifneq ($(Extension_upgrade_files),)
+$(Extension_upgrade_files): $(EXTENSION).upgrade.sql
+	cp $< $@
+endif
+
+structure/newgrants_$(EXTENSION).sql: structure/grants.ini
+	$(GRANTFU) -t -r -d $< > $@
+
+structure/oldgrants_$(EXTENSION).sql: structure/grants.ini structure/grants.sql
+	echo "begin;" > $@
+	$(GRANTFU) -R -o $< >> $@
+	cat structure/grants.sql >> $@
+	echo "commit;" >> $@
+

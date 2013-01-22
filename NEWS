@@ -1,4 +1,101 @@
 
+2012-12-21  -  SkyTools 3.1.3  -  "Chainsaw-wielding Toothfairy"
+
+  = Features =
+
+    * londiste resurrect: Sync queue contents on old dead root.
+    * londiste node-status: Show info about local node.
+    * londiste takeover --dead-root: search for node with latest batches.
+    * londiste compare/repair: work with tables not available on immediate provider
+    * londiste change-handler: change python handler and trigger on table
+
+  = Minor features and cleanups =
+
+    * Auto-upgrade Londiste 2 schema.
+    * debian: /etc/skytools.ini is preconfigured for pgqd and londiste3 scripts.
+    * Clean londiste/cascadeadmin --help text.
+    * syncer: Clean up error messages.
+    * syncer: Add missing throttling.
+    * londiste handlers parameter validation.
+    * Pure-Python fallback for hashtext module.
+
+  = Fixes =
+
+    * If pgq.unregister_consumer() is used on subconsumer, don't drop main consumer.
+    * londiste add-table throws error if table already exists but with different handler.
+    * syncer: throttle queries when waiting
+    * Fix exception_hook crash if curs.query is None
+    * Fix extension version mismatches which made them uninstallable.
+
+2012-11-02  -  SkyTools 3.1.2  -  "Tank in a Tarball"
+
+  = Features =
+
+    * --find-copy-node switch to 'add-table' that instructs 'copy'
+      to walk upwards until it finds node that has full table.
+      Parts of the patch were in earlier, but they did not work
+      on merge node properly.  Now the walk code was moved to copy,
+      instead being done during add-table to fix that.
+
+      Compare and repair does not support (yet) such walking.
+
+  = Minor Features =
+
+    * Allow overrided options with --set to show up in --ini output
+    * Londiste: try to show exact event info on failure.
+
+  = Fixes =
+
+    * walmgr: Move .walshipping.last update AFTER rsync.  Otherwise
+      rsync failure will not be noticed during "master sync".
+    * londiste execute: when ddl was already applied, connection was
+      left in wrong mode.  Fix.
+    * Fix compare expression - md5() was in wrong place.
+    * Fix Londiste compare and repair to accept copy-condition from handler (Asko Oja)
+    * londiste: don't filter EXECUTE or TRUNCATE events on merge node
+    * qadmin: make "install pgq" also install pgq_coop
+    * Fix 2.1 to 3.0 upgade script, rename to pgq.upgrade_2.1_to_3.0.sql
+    * Reorg of Londiste tests (Asko Oja)
+    * Socket library autoconf (Tony Arkles)
+    * pgq: quote internal table names
+    * Bump pgq schema version to 3.1.2
+
+2012-10-09  -  SkyTools 3.1.1  -  "Service Oriented Diapers"
+
+  Queue_mover and queue_splitter now have service names ending with 3.
+  Config files need to change: [queue_mover3], [queue_splitter3].
+
+  = Minor Features =
+
+    * scriptmgr: option for specifying service type (-t / --type)
+    * scriptmgr: status command can optionally be more selective
+    * skytools_upgrade: "dry run" option (--not-really)
+    * pgq.Consumer: log idle time, keepalive_stats tper
+    * pgq.Consumer: keepalive_stats to force logging even when idle
+
+  = Cleanups =
+
+    * qadmin.py: "show version" command
+    * qadmin.py: unified results displaying
+    * skytools.scripting: added shutdown() to BaseScript
+    * skytools.scripting: log config reload, updated comment.
+    * skytools.__init__: added symbols for natsort module
+    * qadmin.py: updated script version, added pgq version, amended messages
+    * scripts: changed queue_mover and queue_splitter service_name to end with '3'
+
+  = Fixes =
+
+    * pgqd: make connections handling more robust
+    * londiste compare/repair: when provider is branch, stop it's worker to get sync
+    * walmgr: Don't complain if a nonexistent WAL file is encountered during cleanup.
+    * pgq_node.demote_root: decrease lock level
+    * londiste.local_remove_table: resture DDL if still attached to table
+    * pgq_coop.next_batch: check and create subconsumers after locking main consumer
+    * --sync-watermark: don't allow subtree wm get above upstream wm
+    * londiste compare: calculate common column names
+    * londiste compare: use md5() if comparing 8.3 with 8.4+
+    * Use python interpreter given by '--with-python=PYTHON' everywhere
+
 2012-07-19  -  SkyTools 3.1  -  "Carnival-on-a-Stick"
 
   = Features =

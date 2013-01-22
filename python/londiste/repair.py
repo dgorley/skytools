@@ -33,7 +33,7 @@ class Repairer(Syncer):
         p.add_option("--apply", action="store_true", help="apply fixes")
         return p
 
-    def process_sync(self, src_tbl, dst_tbl, src_db, dst_db):
+    def process_sync(self, t1, t2, src_db, dst_db):
         """Actual comparision."""
 
         apply_db = None
@@ -42,6 +42,9 @@ class Repairer(Syncer):
             apply_db = self.get_database('db', cache='applydb', autocommit=1)
             self.apply_curs = apply_db.cursor()
             self.apply_curs.execute("set session_replication_role = 'replica'")
+
+        src_tbl = t1.dest_table
+        dst_tbl = t2.dest_table
 
         src_curs = src_db.cursor()
         dst_curs = dst_db.cursor()
@@ -56,11 +59,14 @@ class Repairer(Syncer):
         dump_src = dst_tbl + ".src"
         dump_dst = dst_tbl + ".dst"
 
+        dst_where = t2.plugin.get_copy_condition(src_curs, dst_curs)
+        src_where = dst_where
+
         self.log.info("Dumping src table: %s" % src_tbl)
-        self.dump_table(src_tbl, src_curs, dump_src)
+        self.dump_table(src_tbl, src_curs, dump_src, src_where)
         src_db.commit()
         self.log.info("Dumping dst table: %s" % dst_tbl)
-        self.dump_table(dst_tbl, dst_curs, dump_dst)
+        self.dump_table(dst_tbl, dst_curs, dump_dst, dst_where)
         dst_db.commit()
         
         self.log.info("Sorting src table: %s" % dump_src)
@@ -123,11 +129,13 @@ class Repairer(Syncer):
         cols = ",".join(fqlist)
         self.log.debug("using columns: %s" % cols)
 
-    def dump_table(self, tbl, curs, fn):
+    def dump_table(self, tbl, curs, fn, whr):
         """Dump table to disk."""
         cols = ','.join(self.fq_common_fields)
-        q = "copy %s (%s) to stdout" % (skytools.quote_fqident(tbl), cols)
-
+        if len(whr) == 0:
+            whr = 'true'
+        q = "copy (SELECT %s FROM %s WHERE %s) to stdout" % (cols, skytools.quote_fqident(tbl), whr)
+        self.log.debug("Query: %s" % q)
         f = open(fn, "w", 64*1024)
         curs.copy_expert(q, f)
         size = f.tell()

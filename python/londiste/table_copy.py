@@ -7,6 +7,7 @@ For internal usage.
 
 import sys, time, skytools
 
+from londiste.util import find_copy_source
 from skytools.dbstruct import *
 from londiste.playback import *
 
@@ -159,7 +160,12 @@ class CopyTable(Replicator):
                 tbl_stat.dropped_ddl = ddl
 
         # do truncate & copy
-        self.real_copy(src_curs, dst_curs, tbl_stat, common_cols, src_real_table)
+        self.log.info("%s: start copy" % tbl_stat.name)
+        p = tbl_stat.get_plugin()
+        stats = p.real_copy(src_real_table, src_curs, dst_curs, common_cols)
+        if stats:
+            self.log.info("%s: copy finished: %d bytes, %d rows" % (
+                          tbl_stat.name, stats[0], stats[1]))
 
         # get snapshot
         src_curs.execute("select txid_current_snapshot()")
@@ -215,22 +221,6 @@ class CopyTable(Replicator):
         src_curs.execute(q, [self.queue_name])
         src_db.commit()
 
-    def real_copy(self, srccurs, dstcurs, tbl_stat, col_list, src_real_table):
-        "Actual copy."
-
-        tablename = tbl_stat.name
-        # do copy
-        self.log.info("%s: start copy" % tablename)
-        p = tbl_stat.get_plugin()
-        cond_list = []
-        cond = tbl_stat.table_attrs.get('copy_condition')
-        if cond:
-            cond_list.append(cond)
-        stats = p.real_copy(src_real_table, srccurs, dstcurs, col_list, cond_list)
-        if stats:
-            self.log.info("%s: copy finished: %d bytes, %d rows" % (
-                          tablename, stats[0], stats[1]))
-
     def work(self):
         if not self.reg_ok:
             # check if needed? (table, not existing reg)
@@ -252,22 +242,26 @@ class CopyTable(Replicator):
             if v_attrs:
                 attrs = skytools.db_urldecode(v_attrs)
 
+        # fetch parent consumer state
+        q = "select * from pgq_node.get_consumer_state(%s, %s)"
+        rows = self.exec_cmd(dst_db, q, [ self.queue_name, self.old_consumer_name ])
+        state = rows[0]
+        source_node = state['provider_node']
+        source_location = state['provider_location']
+
         # do we have node here?
         if 'copy_node' in attrs:
-            # take node from attrs
-            source_node = attrs['copy_node']
-            q = "select * from pgq_node.get_queue_locations(%s) where node_name = %s"
-            dst_curs.execute(q, [ self.queue_name, source_node ])
-            rows = dst_curs.fetchall()
-            if len(rows):
-                source_location = rows[0]['node_location']
-        else:
-            # fetch parent consumer state
-            q = "select * from pgq_node.get_consumer_state(%s, %s)"
-            rows = self.exec_cmd(dst_db, q, [ self.queue_name, self.old_consumer_name ])
-            state = rows[0]
-            source_node = state['provider_node']
-            source_location = state['provider_location']
+            if attrs['copy_node'] == '?':
+                source_node, source_location, wname = find_copy_source(self,
+                        self.queue_name, self.copy_table_name, source_node, source_location)
+            else:
+                # take node from attrs
+                source_node = attrs['copy_node']
+                q = "select * from pgq_node.get_queue_locations(%s) where node_name = %s"
+                dst_curs.execute(q, [ self.queue_name, source_node ])
+                rows = dst_curs.fetchall()
+                if len(rows):
+                    source_location = rows[0]['node_location']
 
         self.log.info("Using '%s' as source node", source_node)
         self.register_consumer(source_location)

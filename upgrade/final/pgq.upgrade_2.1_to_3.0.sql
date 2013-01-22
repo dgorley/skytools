@@ -1,3 +1,7 @@
+--
+-- This script upgrades pgq 2.1.x (x > 8) to 3.0.
+-- Later pgq.upgrade.sql should be applied to get to latest 3.x version.
+--
 
 begin;
 
@@ -1768,6 +1772,7 @@ begin
 end;
 $$ language plpgsql;
 
+drop function pgq.next_batch(text, text);
 create or replace function pgq.next_batch(
     in i_queue_name text,
     in i_consumer_name text)

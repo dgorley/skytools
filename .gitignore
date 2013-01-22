@@ -44,6 +44,7 @@ debian/postgresql-*-pgq3/*
 debian/skytools3*/*
 debian/skytools-pgq*/*
 debian/skytools-londiste*/*
+debian/control-pgstamp
 
 python/skytools/installer_config.py
 sql/txid/txid.sql
@@ -53,7 +54,6 @@ sql/londiste/londiste.sql
 sql/londiste/londiste.upgrade.sql
 sql/pgq/pgq.sql
 sql/pgq/pgq.upgrade.sql
-sql/pgq/docs
 sql/pgq_coop/pgq_coop.sql
 sql/pgq_coop/pgq_coop.upgrade.sql
 sql/pgq_ext/pgq_ext.sql
@@ -62,6 +62,12 @@ sql/ticker/pgqd
 sql/txid/txid.sql.in
 tests/londiste/conf
 tests/merge/conf
+
+sql/*/*--*--*.sql
+sql/*/*--*.sql
+sql/*/test.dump
+sql/*/structure/newgrants*.sql
+sql/*/structure/oldgrants*.sql
 
 tmp_files.lst
 sql/ticker/pgqd.ini.h

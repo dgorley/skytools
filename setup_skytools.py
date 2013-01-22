@@ -63,11 +63,13 @@ sql_files = [
    'sql/londiste/londiste.upgrade.sql',
    'sql/pgq_coop/pgq_coop.upgrade.sql',
    'sql/pgq_ext/pgq_ext.upgrade.sql',
+   'upgrade/final/pgq.upgrade_2.1_to_3.0.sql',
+   'upgrade/final/londiste.upgrade_2.1_to_3.1.sql',
 ]
 
 # sql files for special occasions
 extra_sql_files = [
-   'upgrade/final/v3.0_pgq_core.sql',
+    #'upgrade/final/v3.0_pgq_core.sql',
 ]
 
 if not INSTALL_SQL:
@@ -122,7 +124,8 @@ def fixscript(fn, dstdir, sfx):
         return
     dfn = os.path.join(dstdir, fn)
     dfn2 = os.path.join(dstdir, fn2)
-    print("Renaming %s -> %s" % (dfn, fn2))
+    if '-q' not in sys.argv:
+        print("Renaming %s -> %s" % (dfn, fn2))
     if sys.platform == 'win32' and os.path.isfile(dfn2):
         os.remove(dfn2)
     os.rename(dfn, dfn2)
@@ -182,7 +185,7 @@ c_modules = []
 if BUILD_C_MOD:
     ext = [
         Extension("skytools._cquoting", ['python/modules/cquoting.c']),
-        Extension("skytools.hashtext", ['python/modules/hashtext.c']),
+        Extension("skytools._chashtext", ['python/modules/hashtext.c']),
         ]
     c_modules.extend(ext)
 
@@ -202,7 +205,8 @@ setup(
         'python/conf/wal-slave.ini',
         ]),
       ('share/skytools3', sql_files),
-      ('share/skytools3/extra', extra_sql_files)],
+      #('share/skytools3/extra', extra_sql_files),
+    ],
     ext_modules = c_modules,
     scripts = sfx_scripts + nosfx_scripts,
     cmdclass = {

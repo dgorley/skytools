@@ -77,6 +77,39 @@ class BaseHandler:
         self.fq_table_name = skytools.quote_fqident(self.table_name)
         self.fq_dest_table = skytools.quote_fqident(self.dest_table)
         self.args = args
+        self._check_args (args)
+
+    def _parse_args_from_doc (self):
+        doc = self.__doc__ or ""
+        params_descr = []
+        params_found = False
+        for line in doc.splitlines():
+            ln = line.strip()
+            if params_found:
+                if ln == "":
+                    break
+                descr = ln.split (None, 1)
+                name, sep, rest = descr[0].partition('=')
+                if sep:
+                    expr = descr[0].rstrip(":")
+                    text = descr[1].lstrip(":- \t")
+                else:
+                    name, expr, text = params_descr.pop()
+                    text += "\n" + ln
+                params_descr.append ((name, expr, text))
+            elif ln == "Parameters:":
+                params_found = True
+        return params_descr
+
+    def _check_args (self, args):
+        self.valid_arg_names = []
+        passed_arg_names = args.keys() if args else []
+        args_from_doc = self._parse_args_from_doc()
+        if args_from_doc:
+            self.valid_arg_names = list(zip(*args_from_doc)[0])
+        invalid = set(passed_arg_names) - set(self.valid_arg_names)
+        if invalid:
+            raise ValueError ("Invalid handler argument: %s" % list(invalid))
 
     def add(self, trigger_arg_list):
         """Called when table is added.
@@ -106,11 +139,15 @@ class BaseHandler:
         """Called when batch finishes."""
         pass
 
-    def real_copy(self, src_tablename, src_curs, dst_curs, column_list, cond_list):
+    def get_copy_condition(self, src_curs, dst_curs):
+        """ Use if you want to filter data """
+        return ''
+
+    def real_copy(self, src_tablename, src_curs, dst_curs, column_list):
         """do actual table copy and return tuple with number of bytes and rows
         copyed
         """
-        condition = ' and '.join(cond_list)
+        condition = self.get_copy_condition(src_curs, dst_curs)
         return skytools.full_copy(src_tablename, src_curs, dst_curs,
                                   column_list, condition,
                                   dst_tablename = self.dest_table)
@@ -121,7 +158,7 @@ class BaseHandler:
 
 class TableHandler(BaseHandler):
     """Default Londiste handler, inserts events into tables with plain SQL.
-    
+
     Parameters:
       encoding=ENC - Validate and fix incoming data from encoding.
                      Only 'utf8' is supported at the moment.
@@ -168,13 +205,13 @@ class TableHandler(BaseHandler):
 
     def parse_row_data(self, ev):
         """Extract row data from event, with optional encoding fixes.
-        
+
         Returns either string (sql event) or dict (urlenc event).
         """
 
         if len(ev.type) == 1:
             if not self.allow_sql_event:
-                raise Exception('SQL events not suppoted by this handler')
+                raise Exception('SQL events not supported by this handler')
             if self.enc:
                 return self.enc.validate_string(ev.data, self.table_name)
             return ev.data
@@ -184,19 +221,17 @@ class TableHandler(BaseHandler):
                 return self.enc.validate_dict(row, self.table_name)
             return row
 
-    def real_copy(self, src_tablename, src_curs, dst_curs, column_list, cond_list):
+    def real_copy(self, src_tablename, src_curs, dst_curs, column_list):
         """do actual table copy and return tuple with number of bytes and rows
-        copyed
+        copied
         """
-
-        condition = ' and '.join(cond_list)
 
         if self.enc:
             def _write_hook(obj, data):
                 return self.enc.validate_copy(data, column_list, src_tablename)
         else:
             _write_hook = None
-
+        condition = self.get_copy_condition(src_curs, dst_curs)
         return skytools.full_copy(src_tablename, src_curs, dst_curs,
                                   column_list, condition,
                                   dst_tablename = self.dest_table,
@@ -209,7 +244,7 @@ class TableHandler(BaseHandler):
 
 class EncodingValidator:
     def __init__(self, log, encoding = 'utf-8', replacement = u'\ufffd'):
-        """validates the correctness of given encoding. when data contains 
+        """validates the correctness of given encoding. when data contains
         illegal symbols, replaces them with <replacement> and logs the
         incident
         """
@@ -298,6 +333,8 @@ def _parse_arglist(arglist):
 
 def create_handler_string(name, arglist):
     handler = name
+    if name.find('(') >= 0:
+        raise Exception('invalid handler name: %s' % name)
     if arglist:
         args = _parse_arglist(arglist)
         astr = skytools.db_urlencode(args)
@@ -350,13 +387,12 @@ def show(mods):
             kls = _handler_map[n]
             desc = kls.__doc__ or ''
             if desc:
-                desc = desc.split('\n', 1)[0]
+                desc = desc.strip().split('\n', 1)[0]
             print("%s - %s" % (n, desc))
     else:
         for n in mods:
             kls = _handler_map[n]
             desc = kls.__doc__ or ''
             if desc:
-                desc = desc.rstrip()
+                desc = desc.strip()
             print("%s - %s" % (n, desc))
-

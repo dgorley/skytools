@@ -13,7 +13,7 @@ DOCHTML = \
 	faq.html set.notes.html skytools3.html devnotes.html pgqd.html \
 	londiste3.html walmgr3.html qadmin.html scriptmgr.html \
 	sql-grants.html \
-	skytools_upgrade.html queue_mover.html queue_splitter.html \
+	skytools_upgrade.html queue_mover3.html queue_splitter3.html \
 	simple_consumer3.html simple_local_consumer3.html \
 	howto/londiste3_cascaded_rep_howto.html \
 	howto/londiste3_merge_howto.html \
@@ -23,8 +23,9 @@ DOCHTML = \
 
 
 MAN5 =
-MAN1_SFX = scriptmgr.1 skytools_upgrade.1 queue_mover.1 queue_splitter.1
-MAN1 = qadmin.1 pgqd.1 walmgr3.1 londiste3.1 simple_consumer3.1 simple_local_consumer3.1
+MAN1_SFX = scriptmgr.1 skytools_upgrade.1
+MAN1 = qadmin.1 pgqd.1 walmgr3.1 londiste3.1 simple_consumer3.1 simple_local_consumer3.1 \
+       queue_mover3.1 queue_splitter3.1
 
 FQHTML = $(addprefix html/doc/, $(DOCHTML)) $(addprefix html/, $(TOPHTML))
 FQMAN1 = $(addprefix man/, $(MAN1))
@@ -34,8 +35,8 @@ FQMAN = $(FQMAN1) $(FQMAN1_SFX) $(FQMAN5)
 
 COMMON = common.switches.txt common.config.txt
 
-GETATTRS = python ../misc/getattrs.py
-FIXMAN = python ../misc/fixman.py
+GETATTRS = $(PYTHON) ../misc/getattrs.py
+FIXMAN = $(PYTHON) ../misc/fixman.py
 
 #AFLAGS = -a linkcss
 #AFLAGS = -a stylesheet=extra.css

@@ -4,17 +4,20 @@ Consumer that stores last applied position in local file.
 
 For cases where the consumer cannot use single database for remote tracking.
 
+To be subclassed, then override .process_local_batch() or .process_local_event()
+methods.
+
 """
 
 import sys
 import os
 import errno
 import skytools
-import pgq
+from pgq.baseconsumer import BaseConsumer
 
 __all__ = ['LocalConsumer']
 
-class LocalConsumer(pgq.Consumer):
+class LocalConsumer(BaseConsumer):
     """Consumer that applies batches sequentially in second database.
 
     Requirements:
@@ -23,7 +26,7 @@ class LocalConsumer(pgq.Consumer):
 
     Features:
      - Can detect if several batches are already applied to dest db.
-     - If some ticks are lost. allows to seek back on queue.
+     - If some ticks are lost, allows to seek back on queue.
        Whether it succeeds, depends on pgq configuration.
 
     Config options::
@@ -81,7 +84,7 @@ class LocalConsumer(pgq.Consumer):
                 q = "select * from pgq.register_consumer(%s, %s)"
                 curs.execute(q, [self.queue_name, self.consumer_name])
         elif local_tick < 0:
-            self.log.info("Local tick missing, storing queueu tick %d", queue_tick)
+            self.log.info("Local tick missing, storing queue tick %d", queue_tick)
             self.save_local_tick(queue_tick)
         elif local_tick > queue_tick:
             self.log.warning("Tracking out of sync: queue=%d local=%d.  Repositioning on queue.  [Database failure?]",
@@ -116,10 +119,12 @@ class LocalConsumer(pgq.Consumer):
         self.set_batch_done()
 
     def process_local_batch(self, db, batch_id, event_list):
+        """Overridable method to process whole batch."""
         for ev in event_list:
             self.process_local_event(db, batch_id, ev)
 
     def process_local_event(self, db, batch_id, ev):
+        """Overridable method to process one event at a time."""
         raise Exception('process_local_event not implemented')
 
     def is_batch_done(self):
@@ -172,14 +177,14 @@ class LocalConsumer(pgq.Consumer):
             src_db = self.get_database(self.db_name)
             src_curs = src_db.cursor()
 
-            self.log.info("Rewinding queue to tick local tick %d", dst_tick)
+            self.log.info("Rewinding queue to local tick %d", dst_tick)
             q = "select pgq.register_consumer_at(%s, %s, %s)"
             src_curs.execute(q, [self.queue_name, self.consumer_name, dst_tick])
 
             src_db.commit()
         else:
             self.log.error('Cannot rewind, no tick found in local file')
-        
+
     def dst_reset(self):
         self.log.info("Removing local tracking file")
         try:
@@ -208,4 +213,3 @@ class LocalConsumer(pgq.Consumer):
         """Store tick in local file."""
         data = str(tick_id)
         skytools.write_atomic(self.local_tracking_file, data)
-

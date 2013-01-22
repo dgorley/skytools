@@ -24,6 +24,7 @@ Replication Daemon:
 Replication Administration:
   add-table TBL ...     add table to queue
   remove-table TBL ...  remove table from queue
+  change-handler TBL    change handler for the table
   add-seq SEQ ...       add sequence to provider
   remove-seq SEQ ...    remove sequence from provider
   tables                show all tables on provider
@@ -46,9 +47,9 @@ Internal Commands:
 
 cmd_handlers = (
     (('create-root', 'create-branch', 'create-leaf', 'members', 'tag-dead', 'tag-alive',
-      'change-provider', 'rename-node', 'status', 'pause', 'resume', 'node-info',
-      'drop-node', 'takeover'), londiste.LondisteSetup),
-    (('add-table', 'remove-table', 'add-seq', 'remove-seq', 'tables', 'seqs',
+      'change-provider', 'rename-node', 'status', 'node-status', 'pause', 'resume', 'node-info',
+      'drop-node', 'takeover', 'resurrect'), londiste.LondisteSetup),
+    (('add-table', 'remove-table', 'change-handler', 'add-seq', 'remove-seq', 'tables', 'seqs',
       'missing', 'resync', 'wait-sync', 'wait-root', 'wait-provider',
       'check', 'fkeys', 'execute'), londiste.LondisteSetup),
     (('show-handlers',), londiste.LondisteSetup),
@@ -60,6 +61,8 @@ cmd_handlers = (
 
 class Londiste(skytools.DBScript):
     def __init__(self, args):
+        self.full_args = args
+
         skytools.DBScript.__init__(self, 'londiste3', args)
 
         if len(self.args) < 2:
@@ -80,7 +83,7 @@ class Londiste(skytools.DBScript):
 
     def print_ini(self):
         """Let the Replicator print the default config."""
-        londiste.Replicator(['--ini'])
+        londiste.Replicator(self.full_args)
 
     def init_optparse(self, parser=None):
         p = skytools.DBScript.init_optparse(self, parser)
@@ -138,8 +141,6 @@ class Londiste(skytools.DBScript):
                 help = "add: walk upstream to find node to copy from")
         g.add_option("--copy-node", dest="copy_node",
                 help = "add: use NODE as source for initial COPY")
-        g.add_option("--copy-condition", dest="copy_condition",
-                help = "add: set WHERE expression for copy")
         g.add_option("--merge-all", action="store_true",
                 help="merge tables from all source queues", default=False)
         g.add_option("--no-merge", action="store_true",

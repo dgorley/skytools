@@ -43,11 +43,15 @@ table_mode:
     * direct - non-partitioned table
     * ignore - all events are ignored
 
+part_func:
+    database function to use for creating partition table.
+    default is {londiste|public}.create_partition
+
 part_mode:
-    * batch_time - paritioned by batch creation time (default)
+    * batch_time - partitioned by batch creation time (default)
     * event_time - partitioned by event creation time
-    * date_field - paritioned by date_field value. part_field required
-    * current_time - paritioned by current time
+    * date_field - partitioned by date_field value. part_field required
+    * current_time - partitioned by current time
 
 part_field:
     date_field to use for partition. Required when part_mode=date_field
@@ -61,7 +65,7 @@ period:
 
 part_name:
     custom name template for partition table. default is None as it is built
-    automatically
+    automatically.
     example for daily partition: %(parent)s_%(year)s_%(month)s_%(day)s
     template variables:
     * parent - parent table name
@@ -72,14 +76,14 @@ part_name:
 
 part_template:
     custom sql template for creating partition table. if omitted then partition
-    function is used. when function is missing then parent table is cloned.
+    function is used.
     template variables:
     * dest - destination table name. result on part_name evaluation
     * part - same as dest
     * parent - parent table name
     * pkey - parent table primary keys
     * schema_table - table name with replace: '.' -> '__'. for using in
-    pk names etc.
+        pk names etc.
     * part_field - date field name if table is partitioned by field
     * part_time - time of partition
 
@@ -103,12 +107,12 @@ load_mode:
 
 method:
     loading method for load_mode bulk. defaults to 0
-      0 (correct) - inserts as COPY into table,
+    * 0 (correct) - inserts as COPY into table,
                     update as COPY into temp table and single UPDATE from there
                     delete as COPY into temp table and single DELETE from there
-      1 (delete)  - as 'correct', but do update as DELETE + COPY
-      2 (merged)  - as 'delete', but merge insert rows with update rows
-      3 (insert)  - COPY inserts into table, error when other events
+    * 1 (delete)  - as 'correct', but do update as DELETE + COPY
+    * 2 (merged)  - as 'delete', but merge insert rows with update rows
+    * 3 (insert)  - COPY inserts into table, error when other events
 
 fields:
     field name map for using just part of the fields and rename them
@@ -136,8 +140,10 @@ encoding:
     and logs them as warnings
 
 analyze:
-    0 - do not run analyze on temp tables (default)
-    1 - run analyze on temp tables
+    * 0 - do not run analyze on temp tables (default)
+    * 1 - run analyze on temp tables
+
+== NOTES ==
 
 NB! londiste3 does not currently support table renaming and field mapping when
 creating or coping initial data to destination table.  --expect-sync and
@@ -636,6 +642,29 @@ class Dispatcher(BaseHandler):
         else:
             self.encoding_validator = None
 
+    def _parse_args_from_doc (self):
+        doc = __doc__
+        params_descr = []
+        params_found = False
+        for line in doc.splitlines():
+            ln = line.strip()
+            if params_found:
+                if ln.startswith("=="):
+                    break
+                m = re.match ("^(\w+):$", ln)
+                if m:
+                    name = m.group(1)
+                    expr = text = ""
+                elif not params_descr:
+                    continue
+                else:
+                    name, expr, text = params_descr.pop()
+                    text += ln + "\n"
+                params_descr.append ((name, expr, text))
+            elif ln == "== HANDLER ARGUMENTS ==":
+                params_found = True
+        return params_descr
+
     def get_config(self):
         """Processes args dict"""
         conf = skytools.dbdict()
@@ -853,7 +882,7 @@ class Dispatcher(BaseHandler):
                 curs.execute(pfcall, vals)
             else:
                 #
-                # Otherwise crete simple clone.
+                # Otherwise create simple clone.
                 #
                 # FixMe: differences from create_partitions():
                 # - check constraints
@@ -866,12 +895,12 @@ class Dispatcher(BaseHandler):
         exec_with_vals(self.conf.post_part)
         self.log.info("Created table: %s" % dst)
 
-    def real_copy(self, tablename, src_curs, dst_curs, column_list, cond_list):
+    def real_copy(self, tablename, src_curs, dst_curs, column_list):
         """do actual table copy and return tuple with number of bytes and rows
-        copyed
+        copied
         """
         _src_cols = _dst_cols = column_list
-        condition = ' and '.join(cond_list)
+        condition = ''
 
         if self.conf.skip_fields:
             _src_cols = [col for col in column_list
@@ -894,6 +923,15 @@ class Dispatcher(BaseHandler):
                                   write_hook = _write_hook)
 
 
+# add arguments' description to handler's docstring
+found = False
+for line in __doc__.splitlines():
+    if line.startswith ("== HANDLER ARGUMENTS =="):
+        found = True
+    if found:
+        Dispatcher.__doc__ += "\n" + line
+del found
+
 
 #------------------------------------------------------------------------------
 # register handler class
@@ -904,7 +942,7 @@ __londiste_handlers__ = [Dispatcher]
 
 
 #------------------------------------------------------------------------------
-# helper function for creating dispachers with different default values
+# helper function for creating dispatchers with different default values
 #------------------------------------------------------------------------------
 
 handler_args = partial(handler_args, cls=Dispatcher)
@@ -931,6 +969,13 @@ BASE = { 'table_mode': 'part',
          'row_mode': 'keep_latest',
 }
 
+def set_handler_doc (cls, defs):
+    """ generate handler docstring """
+    cls.__doc__ = "Custom dispatch handler with default args.\n\n" \
+                  "Parameters:\n"
+    for k,v in defs.items():
+        cls.__doc__ += "  %s = %s\n" % (k,v)
+
 for load, load_dict in LOAD.items():
     for period, period_dict in PERIOD.items():
         for mode, mode_dict in MODE.items():
@@ -942,12 +987,18 @@ for load, load_dict in LOAD.items():
                 def handler_func(args):
                     return update(args, default)
             create_handler()
+            hcls = __londiste_handlers__[-1] # it was just added
+            defs = update(mode_dict, period_dict, load_dict, BASE)
+            set_handler_doc (hcls, defs)
+del (hcls, defs)
 
 
 @handler_args('bulk_direct')
 def bulk_direct_handler(args):
     return update(args, {'load_mode': 'bulk', 'table_mode': 'direct'})
+set_handler_doc (__londiste_handlers__[-1], {'load_mode': 'bulk', 'table_mode': 'direct'})
 
 @handler_args('direct')
 def direct_handler(args):
     return update(args, {'load_mode': 'direct', 'table_mode': 'direct'})
+set_handler_doc (__londiste_handlers__[-1], {'load_mode': 'direct', 'table_mode': 'direct'})

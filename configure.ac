@@ -1,6 +1,6 @@
 dnl Process this file with autoconf to produce a configure script.
 
-AC_INIT(skytools, 3.1)
+AC_INIT(skytools, 3.1.3)
 AC_CONFIG_SRCDIR(python/londiste.py)
 AC_CONFIG_HEADER(lib/usual/config.h)
 AC_PREREQ([2.59])
@@ -146,6 +146,9 @@ AC_CHECK_FUNCS(unsetenv)
 
 dnl Optional use of libevent
 AC_USUAL_LIBEVENT_OPT
+
+dnl Needed on SmartOS (Solaris)
+AC_SEARCH_LIBS([socket],[socket])
 
 AC_USUAL_DEBUG
 AC_USUAL_CASSERT

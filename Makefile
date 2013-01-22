@@ -10,7 +10,8 @@ SUBDIRS = sql doc
 # modules that use doctest for regtests
 DOCTESTMODS = skytools.quoting skytools.parsing skytools.timeutil \
 	   skytools.sqltools skytools.querybuilder skytools.natsort \
-	   skytools.utf8 skytools.sockutil skytools.fileutil
+	   skytools.utf8 skytools.sockutil skytools.fileutil \
+	   londiste.exec_attrs
 
 
 all: python-all sub-all config.mak
@@ -63,6 +64,8 @@ distclean: sub-distclean
 	rm -rf autom4te.cache config.log config.status config.mak
 
 deb:
+	rm -f debian/control
+	make -f debian/rules debian/control
 	debuild -uc -us -b
 
 tgz: config.mak clean

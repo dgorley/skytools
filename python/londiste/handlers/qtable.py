@@ -2,13 +2,13 @@
 
 Handlers:
 
-qtable      - dummy handler to setup queue tables. All events are ignored. use in 
-              root node
-fake_local  - dummy handler to setup queue tables. All events are ignored. Table
-              structure is not required. Use in branch/leaf
-qsplitter  -  dummy handler to setup queue tables. All events are ignored. Table
-              structure is not required. All table events are inserted to
-              destination queue, specified with handler arg 'queue'.
+qtable     - dummy handler to setup queue tables. All events are ignored. Use in
+             root node.
+fake_local - dummy handler to setup queue tables. All events are ignored. Table
+             structure is not required. Use in branch/leaf.
+qsplitter  - dummy handler to setup queue tables. All events are ignored. Table
+             structure is not required. All table events are inserted to
+             destination queue, specified with handler arg 'queue'.
 
 """
 
@@ -21,7 +21,7 @@ __all__ = ['QueueTableHandler', 'QueueSplitterHandler']
 
 class QueueTableHandler(BaseHandler):
     """Queue table handler. Do nothing.
-    
+
     Trigger: before-insert, skip trigger.
     Event-processing: do nothing.
     """
@@ -33,7 +33,7 @@ class QueueTableHandler(BaseHandler):
         trigger_arg_list.append('SKIP')
         trigger_arg_list.append('expect_sync')
 
-    def real_copy(self, tablename, src_curs, dst_curs, column_list, cond_list):
+    def real_copy(self, tablename, src_curs, dst_curs, column_list):
         """Force copy not to start"""
         return (0,0)
 
@@ -44,7 +44,7 @@ class QueueSplitterHandler(BaseHandler):
     """Send events for one table to another queue.
 
     Parameters:
-      queue=QUEUE   Queue name.
+      queue=QUEUE - Queue name.
     """
     handler_name = 'qsplitter'
 

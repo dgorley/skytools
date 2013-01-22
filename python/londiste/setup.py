@@ -20,7 +20,7 @@ class LondisteSetup(CascadeAdmin):
     def install_code(self, db):
         self.extra_objs = [
             skytools.DBSchema("londiste", sql_file = 'londiste.sql'),
-            skytools.DBFunction("londiste.global_add_table", 2, sql_file = 'londiste.upgrade.2to3.sql'),
+            skytools.DBFunction("londiste.global_add_table", 2, sql_file = 'londiste.upgrade_2.1_to_3.1.sql'),
         ]
         CascadeAdmin.install_code(self, db)
 
@@ -50,8 +50,6 @@ class LondisteSetup(CascadeAdmin):
                 help = "add: find table source for copy by walking upwards")
         p.add_option("--copy-node", dest="copy_node",
                 help = "add: use NODE as source for initial copy")
-        p.add_option("--copy-condition", dest="copy_condition",
-                help = "copy: where expression")
         p.add_option("--force", action="store_true",
                     help="force", default=False)
         p.add_option("--all", action="store_true",
@@ -80,7 +78,6 @@ class LondisteSetup(CascadeAdmin):
                     help="max number of parallel copy processes")
         p.add_option("--dest-table",
                     help="add: name for actual table")
-
         return p
 
     def extra_init(self, node_type, node_db, provider_db):
@@ -137,17 +134,8 @@ class LondisteSetup(CascadeAdmin):
         needs_tbl = self.handler_needs_table()
         args = self.expand_arg_list(dst_db, 'r', False, args, needs_tbl)
 
-        # search for usable copy node if requested
-        if (self.options.find_copy_node
-                and not self.is_root()
-                and needs_tbl):
-            src_db = self.find_copy_node(dst_db, args)
-            src_curs = src_db.cursor()
-            src_tbls = self.fetch_set_tables(src_curs)
-            src_db.commit()
-
         # dont check for exist/not here (root handling)
-        if not self.is_root() and not self.options.expect_sync:
+        if not self.is_root() and not self.options.expect_sync and not self.options.find_copy_node:
             problems = False
             for tbl in args:
                 tbl = skytools.fq_name(tbl)
@@ -171,6 +159,11 @@ class LondisteSetup(CascadeAdmin):
             self.log.error("--dest-table can be given only for single table")
             sys.exit(1)
 
+        # not implemented
+        if self.options.find_copy_node and create_flags != 0:
+            self.log.error("--find-copy-node does not work with --create")
+            sys.exit(1)
+
         # seems ok
         for tbl in args:
             self.add_table(src_db, dst_db, tbl, create_flags, src_tbls)
@@ -178,7 +171,6 @@ class LondisteSetup(CascadeAdmin):
         # wait
         if self.options.wait_sync:
             self.wait_for_sync(dst_db)
-
 
     def add_table(self, src_db, dst_db, tbl, create_flags, src_tbls):
         # use full names
@@ -217,38 +209,21 @@ class LondisteSetup(CascadeAdmin):
                     newname = dest_table
                 s.create(dst_curs, create_flags, log = self.log, new_table_name = newname)
 
-        tgargs = []
-        if self.options.trigger_arg:
-            tgargs = self.options.trigger_arg
-        tgflags = self.options.trigger_flags
-        if tgflags:
-            tgargs.append('tgflags='+tgflags)
-        if self.options.no_triggers:
-            tgargs.append('no_triggers')
-        if self.options.merge_all:
-            tgargs.append('merge_all')
-        if self.options.no_merge:
-            tgargs.append('no_merge')
+        tgargs = self.build_tgargs()
 
         attrs = {}
+
         if self.options.handler:
-            hstr = londiste.handler.create_handler_string(
-                            self.options.handler, self.options.handler_arg)
-            p = londiste.handler.build_handler(tbl, hstr, self.options.dest_table)
-            attrs['handler'] = hstr
-            p.add(tgargs)
+            attrs['handler'] = self.build_handler(tbl, tgargs, self.options.dest_table)
 
-        if self.options.copy_node:
+        if self.options.find_copy_node:
+            attrs['copy_node'] = '?'
+        elif self.options.copy_node:
             attrs['copy_node'] = self.options.copy_node
-
-        if self.options.expect_sync:
-            tgargs.append('expect_sync')
 
         if not self.options.expect_sync:
             if self.options.skip_truncate:
                 attrs['skip_truncate'] = 1
-            if self.options.copy_condition:
-                attrs['copy_condition'] = self.options.copy_condition
 
         if self.options.max_parallel_copy:
             attrs['max_parallel_copy'] = self.options.max_parallel_copy
@@ -263,6 +238,32 @@ class LondisteSetup(CascadeAdmin):
         self.exec_cmd(dst_curs, q, args)
         dst_db.commit()
 
+    def build_tgargs(self):
+        """Build trigger args"""
+        tgargs = []
+        if self.options.trigger_arg:
+            tgargs = self.options.trigger_arg
+        tgflags = self.options.trigger_flags
+        if tgflags:
+            tgargs.append('tgflags='+tgflags)
+        if self.options.no_triggers:
+            tgargs.append('no_triggers')
+        if self.options.merge_all:
+            tgargs.append('merge_all')
+        if self.options.no_merge:
+            tgargs.append('no_merge')
+        if self.options.expect_sync:
+            tgargs.append('expect_sync')
+        return tgargs
+
+    def build_handler(self, tbl, tgargs, dest_table=None):
+        """Build handler and return handler string"""
+        hstr = londiste.handler.create_handler_string(
+                self.options.handler, self.options.handler_arg)
+        p = londiste.handler.build_handler(tbl, hstr, dest_table)
+        p.add(tgargs)
+        return hstr
+
     def handler_needs_table(self):
         if self.options.handler:
             hstr = londiste.handler.create_handler_string(
@@ -270,15 +271,6 @@ class LondisteSetup(CascadeAdmin):
             p = londiste.handler.build_handler('unused.string', hstr, None)
             return p.needs_table()
         return True
-
-    def handler_allows_copy(self, table_attrs):
-        """Decide if table is copyable based on attrs."""
-        if not table_attrs:
-            return True
-        attrs = skytools.db_urldecode(table_attrs)
-        hstr = attrs['handler']
-        p = londiste.handler.build_handler('unused.string', hstr, None)
-        return p.needs_table()
 
     def sync_table_list(self, dst_curs, src_tbls, dst_tbls):
         for tbl in src_tbls.keys():
@@ -310,6 +302,50 @@ class LondisteSetup(CascadeAdmin):
         args = self.expand_arg_list(db, 'r', True, args)
         q = "select * from londiste.local_remove_table(%s, %s)"
         self.exec_cmd_many(db, q, [self.set_name], args)
+
+    def cmd_change_handler(self, tbl):
+        """Change handler (table_attrs) of the replicated table."""
+
+        self.load_local_info()
+
+        tbl = skytools.fq_name(tbl)
+
+        db = self.get_database('db')
+        curs = db.cursor()
+        q = "select table_attrs, dest_table "\
+            " from londiste.get_table_list(%s) "\
+            " where table_name = %s and local"
+        curs.execute(q, [self.set_name, tbl])
+        if curs.rowcount == 0:
+            self.log.error("Table %s not found on this node" % tbl)
+            sys.exit(1)
+
+        attrs, dest_table = curs.fetchone()
+        attrs = skytools.db_urldecode(attrs or '')
+        old_handler = attrs.get('handler')
+
+        tgargs = self.build_tgargs()
+        if self.options.handler:
+            new_handler = self.build_handler(tbl, tgargs, dest_table)
+        else:
+            new_handler = None
+
+        if old_handler == new_handler:
+            self.log.info("Handler is already set to desired value, nothing done")
+            sys.exit(0)
+
+        if new_handler:
+            attrs['handler'] = new_handler
+        elif 'handler' in attrs:
+            del attrs['handler']
+
+        args = [self.set_name, tbl, tgargs, None]
+        if attrs:
+            args[3] = skytools.db_urlencode(attrs)
+
+        q = "select * from londiste.local_change_handler(%s, %s, %s, %s)"
+        self.exec_cmd(curs, q, args)
+        db.commit()
 
     def cmd_add_seq(self, *args):
         """Attach seqs(s) to local node."""
@@ -394,7 +430,7 @@ class LondisteSetup(CascadeAdmin):
         self.exec_cmd_many(db, q, [self.set_name], args)
 
     def cmd_resync(self, *args):
-        """Reload data from provider node.."""
+        """Reload data from provider node."""
         db = self.get_database('db')
         args = self.expand_arg_list(db, 'r', True, args)
         q = "select * from londiste.local_set_table_state(%s, %s, null, null)"
@@ -480,60 +516,6 @@ class LondisteSetup(CascadeAdmin):
             q = "select * from londiste.execute_finish(%s, %s)"
             self.exec_cmd(db, q, [self.queue_name, fname], commit = False)
         db.commit()
-
-    def find_copy_node(self, dst_db, args):
-        src_db = self.get_provider_db()
-
-        need = {}
-        for t in args:
-            need[t] = 1
-
-        while 1:
-            src_curs = src_db.cursor()
-
-            q = "select * from pgq_node.get_node_info(%s)"
-            src_curs.execute(q, [self.queue_name])
-            info = src_curs.fetchone()
-            if info['ret_code'] >= 400:
-                raise UsageError("Node does not exists")
-
-            self.log.info("Checking if %s can be used for copy", info['node_name'])
-
-            q = "select table_name, local, table_attrs from londiste.get_table_list(%s)"
-            src_curs.execute(q, [self.queue_name])
-            got = {}
-            for row in src_curs.fetchall():
-                tbl = row['table_name']
-                if tbl not in need:
-                    continue
-                if not row['local']:
-                    self.log.debug("Problem: %s is not local", tbl)
-                    continue
-                if not self.handler_allows_copy(row['table_attrs']):
-                    self.log.debug("Problem: %s handler does not store data [%s]", tbl, row['table_attrs'])
-                    continue
-                self.log.debug("Good: %s is usable", tbl)
-                got[row['table_name']] = 1
-
-            ok = 1
-            for t in args:
-                if t not in got:
-                    self.log.info("Node %s does not have all tables", info['node_name'])
-                    ok = 0
-                    break
-
-            if ok:
-                self.options.copy_node = info['node_name']
-                self.log.info("Node %s seems good source, using it", info['node_name'])
-                break
-
-            if info['node_type'] == 'root':
-                raise skytools.UsageError("Found root and no source found")
-
-            self.close_database('provider_db')
-            src_db = self.get_database('provider_db', connstr = info['provider_location'])
-
-        return src_db
 
     def get_provider_db(self):
 
@@ -701,3 +683,36 @@ class LondisteSetup(CascadeAdmin):
 
         self.log.info("All done")
 
+    def resurrect_dump_event(self, ev, stats, batch_info):
+        """Collect per-table stats."""
+
+        super(LondisteSetup, self).resurrect_dump_event(ev, stats, batch_info)
+
+        ROLLBACK = 'can rollback'
+        NO_ROLLBACK = 'cannot rollback'
+
+        if ev.ev_type == 'TRUNCATE':
+            if 'truncated_tables' not in stats:
+                stats['truncated_tables'] = []
+            tlist = stats['truncated_tables']
+            tbl = ev.ev_extra1
+            if tbl not in tlist:
+                tlist.append(tbl)
+        elif ev.ev_type[:2] in ('I:', 'U:', 'D:', 'I', 'U', 'D'):
+            op = ev.ev_type[0]
+            tbl = ev.ev_extra1
+            bak = ev.ev_extra3
+            tblkey = 'table: %s' % tbl
+            if tblkey not in stats:
+                stats[tblkey] = [0,0,0,ROLLBACK]
+            tinfo = stats[tblkey]
+            if op == 'I':
+                tinfo[0] += 1
+            elif op == 'U':
+                tinfo[1] += 1
+                if not bak:
+                    tinfo[3] = NO_ROLLBACK
+            elif op == 'D':
+                tinfo[2] += 1
+                if not bak and ev.ev_type == 'D':
+                    tinfo[3] = NO_ROLLBACK

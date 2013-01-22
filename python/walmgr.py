@@ -1502,7 +1502,6 @@ STOP TIME: %(stop_time)s
         self.log.debug("%s: start copy", srcname)
         
         self.master_periodic()
-        self.set_last_complete(srcname)
         
         dst_loc = self.cf.getfile("completed_wals")
         if dst_loc[-1] != "/":
@@ -1516,6 +1515,9 @@ STOP TIME: %(stop_time)s
         slave = self.cf.get("slave")
         cmdline = ["ssh", "-nT", slave, "sync" ]
         self.exec_cmd(cmdline)
+
+        # slave has the file now, set markers
+        self.set_last_complete(srcname)
 
         self.log.debug("%s: done", srcname)
         end_time = time.time()
@@ -1751,6 +1753,7 @@ STOP TIME: %(stop_time)s
                 self.log.fatal("xrestore %s crashed: %s: '%s' (%s: %s)" % (
                            srcname, str(exc), str(msg).rstrip(),
                            str(tb), repr(traceback.format_tb(tb))))
+                del tb
                 time.sleep(10)
                 self.log.info("Re-exec: %s", repr(sys.argv))
                 os.execv(sys.argv[0], sys.argv)
@@ -2366,7 +2369,12 @@ STOP TIME: %(stop_time)s
             if fname < last:
                 self.log.debug("deleting %s" % full)
                 if not self.not_really:
-                    os.remove(full)
+                    try:
+                        os.remove(full)
+                    except:
+                        # don't report the errors if the file has been already removed
+                        # happens due to conflicts with pg_archivecleanup for instance.
+                        pass
             cur_last = fname
         return cur_last
 

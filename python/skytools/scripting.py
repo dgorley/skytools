@@ -126,7 +126,8 @@ def _init_log(job_name, service_name, cf, log_level, is_daemon):
         skytools.skylog.set_service_name(service_name, job_name)
 
         # load general config
-        flist = ['skylog.ini', '~/.skylog.ini', '/etc/skylog.ini']
+        flist = cf.getlist('skylog_locations',
+                           ['skylog.ini', '~/.skylog.ini', '/etc/skylog.ini'])
         for fn in flist:
             fn = os.path.expanduser(fn)
             if os.path.isfile(fn):
@@ -189,7 +190,7 @@ class BaseScript(object):
 
     Config template::
 
-        ## Parameters for skytools.DBScript ##
+        ## Parameters for skytools.BaseScript ##
 
         # how many seconds to sleep between work loops
         # if missing or 0, then instead sleeping, the script will exit
@@ -210,6 +211,9 @@ class BaseScript(object):
         #   1 - enabled, unless non-daemon on console (os.isatty())
         #   2 - always enabled
         #use_skylog = 0
+
+        # where to find skylog.ini
+        #skylog_locations = skylog.ini, ~/.skylog.ini, /etc/skylog.ini
 
         # how many seconds to sleep after catching a exception
         #exception_sleep = 20
@@ -242,14 +246,14 @@ class BaseScript(object):
         """Script setup.
 
         User class should override work() and optionally __init__(), startup(),
-        reload(), reset() and init_optparse().
+        reload(), reset(), shutdown() and init_optparse().
 
-        NB: in case of daemon, the __init__() and startup()/work() will be
+        NB: In case of daemon, __init__() and startup()/work()/shutdown() will be
         run in different processes.  So nothing fancy should be done in __init__().
 
         @param service_name: unique name for script.
             It will be also default job_name, if not specified in config.
-        @param args: cmdline args (sys.argv[1:]), but can be overrided
+        @param args: cmdline args (sys.argv[1:]), but can be overridden
         """
         self.service_name = service_name
         self.go_daemon = 0
@@ -273,15 +277,16 @@ class BaseScript(object):
             self.log_level = skytools.skylog.TRACE
         elif self.options.verbose:
             self.log_level = logging.DEBUG
-        if self.options.ini:
-            self.print_ini()
-            sys.exit(0)
 
         self.cf_override = {}
         if self.options.set:
             for a in self.options.set:
                 k, v = a.split('=', 1)
                 self.cf_override[k.strip()] = v.strip()
+
+        if self.options.ini:
+            self.print_ini()
+            sys.exit(0)
 
         # read config file
         self.reload()
@@ -298,7 +303,10 @@ class BaseScript(object):
             self.send_signal(signal.SIGHUP)
 
     def print_version(self):
-        print '%s, Skytools version %s' % (self.service_name, skytools.__version__)
+        service = self.service_name
+        if getattr(self, '__version__', None):
+            service += ' version %s' % self.__version__
+        print '%s, Skytools version %s' % (service, skytools.__version__)
 
     def print_ini(self):
         """Prints out ini file from doc string of the script of default for dbscript
@@ -328,15 +336,36 @@ class BaseScript(object):
         if pos < 0:
             return
         doc = doc[pos+2 : ].rstrip()
+        doc = skytools.dedent(doc)
 
-        print(skytools.dedent(doc))
+        # merge overrided options into output
+        for ln in doc.splitlines():
+            vals = ln.split('=', 1)
+            if len(vals) != 2:
+                print(ln)
+                continue
+
+            k = vals[0].strip()
+            v = vals[1].strip()
+            if k and k[0] == '#':
+                print(ln)
+                k = k[1:]
+                if k in self.cf_override:
+                    print('%s = %s' % (k, self.cf_override[k]))
+            elif k in self.cf_override:
+                if v:
+                    print('#' + ln)
+                print('%s = %s' % (k, self.cf_override[k]))
+            else:
+                print(ln)
+
         print('')
 
     def load_config(self):
         """Loads and returns skytools.Config instance.
 
         By default it uses first command-line argument as config
-        file name.  Can be overrided.
+        file name.  Can be overridden.
         """
 
         if len(self.args) < 1:
@@ -351,7 +380,7 @@ class BaseScript(object):
         """Initialize a OptionParser() instance that will be used to
         parse command line arguments.
 
-        Note that it can be overrided both directions - either DBScript
+        Note that it can be overridden both directions - either DBScript
         will initialize a instance and passes to user code or user can
         initialize and then pass to DBScript.init_optparse().
 
@@ -433,6 +462,7 @@ class BaseScript(object):
             self.cf = self.load_config()
         else:
             self.cf.reload()
+            self.log.info ("Config reloaded")
         self.job_name = self.cf.get("job_name")
         self.pidfile = self.cf.getfile("pidfile", '')
         self.loop_delay = self.cf.getfloat("loop_delay", 1.0)
@@ -452,15 +482,23 @@ class BaseScript(object):
             sys.exit(1)
         self.last_sigint = t
 
+    def stat_get(self, key):
+        """Reads a stat value."""
+        try:
+            value = self.stat_dict[key]
+        except KeyError:
+            value = None
+        return value
+
     def stat_put(self, key, value):
         """Sets a stat value."""
         self.stat_dict[key] = value
 
     def stat_increase(self, key, increase = 1):
         """Increases a stat value."""
-        if key in self.stat_dict:
+        try:
             self.stat_dict[key] += increase
-        else:
+        except KeyError:
             self.stat_dict[key] = increase
 
     def send_stats(self):
@@ -468,7 +506,7 @@ class BaseScript(object):
 
         res = []
         for k, v in self.stat_dict.items():
-            res.append("%s: %s" % (k, str(v)))
+            res.append("%s: %s" % (k, v))
 
         if len(res) == 0:
             return
@@ -509,6 +547,9 @@ class BaseScript(object):
                         break
                 else:
                     break
+
+        # run shutdown, safely?
+        self.shutdown()
 
     def run_once(self):
         state = self.run_func_safely(self.work, True)
@@ -590,12 +631,21 @@ class BaseScript(object):
         In case of daemon, if will be called in same process as work(),
         unlike __init__().
         """
+        self.started = time.time()
 
         # set signals
         if hasattr(signal, 'SIGHUP'):
             signal.signal(signal.SIGHUP, self.hook_sighup)
         if hasattr(signal, 'SIGINT'):
             signal.signal(signal.SIGINT, self.hook_sigint)
+
+    def shutdown(self):
+        """Will be called just after exiting main loop.
+
+        In case of daemon, if will be called in same process as work(),
+        unlike __init__().
+        """
+        pass
 
     # define some aliases (short-cuts / backward compatibility cruft)
     stat_add = stat_put                 # Old, deprecated function.
@@ -632,7 +682,7 @@ class DBScript(BaseScript):
 
         @param service_name: unique name for script.
             It will be also default job_name, if not specified in config.
-        @param args: cmdline args (sys.argv[1:]), but can be overrided
+        @param args: cmdline args (sys.argv[1:]), but can be overridden
         """
         self.db_cache = {}
         self._db_defaults = {}
@@ -733,11 +783,9 @@ class DBScript(BaseScript):
         if cname:
             # Properly named connection
             cname = d.cursor.connection.my_name
-            dsn = getattr(conn, 'dsn', '?')
-            sql = getattr(curs, 'query', '?')
+            sql = getattr(curs, 'query', None) or '?'
             if len(sql) > 200: # avoid logging londiste huge batched queries
                 sql = sql[:60] + " ..."
-            emsg = str(d).strip()
             self.log.exception("Job %s got error on connection '%s': %s.   Query: %s" % (
                 self.job_name, cname, emsg, sql))
         else:
@@ -857,7 +905,6 @@ class DBScript(BaseScript):
                 raise Exception("db error")
             # error is already logged
             sys.exit(1)
-
 
     def listen(self, dbname, channel):
         """Make connection listen for specific event channel.

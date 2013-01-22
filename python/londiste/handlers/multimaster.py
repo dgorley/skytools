@@ -16,7 +16,7 @@ from londiste.handlers import update
 __all__ = ['MultimasterHandler']
 
 class MultimasterHandler(ApplyFuncHandler):
-    """Handle multimaster replicas"""
+    __doc__ = __doc__
     handler_name = 'multimaster'
 
     def __init__(self, table_name, args, dest_table):
@@ -27,9 +27,12 @@ class MultimasterHandler(ApplyFuncHandler):
             if name in conf:
                 conf.pop(name)
         conf = skytools.db_urlencode(conf)
-        args = update(args, {'func_name': 'merge_on_time', 'func_conf': conf})  
+        args = update(args, {'func_name': 'merge_on_time', 'func_conf': conf})
         ApplyFuncHandler.__init__(self, table_name, args, dest_table)
-    
+
+    def _check_args (self, args):
+        pass # any arg can be passed
+
     def add(self, trigger_arg_list):
         """Create SKIP and BEFORE INSERT trigger"""
         trigger_arg_list.append('no_merge')

@@ -6,6 +6,8 @@ import logging, logging.handlers
 
 import skytools
 
+__all__ = ['getLogger']
+
 # add TRACE level
 TRACE = 5
 logging.TRACE = TRACE
@@ -211,7 +213,7 @@ class LogDBHandler(logging.handlers.SocketHandler):
             self.stat_cache[k] = agg
 
     def flush_stats(self, service):
-        """Send awuired stats to logdb."""
+        """Send acquired stats to logdb."""
         res = []
         for k, v in self.stat_cache.items():
             res.append("%s: %s" % (k, str(v)))
@@ -239,13 +241,9 @@ class SysLogHandler(logging.handlers.SysLogHandler):
     # be compatible with both 2.6 and 2.7
     socktype = socket.SOCK_DGRAM
 
-    def emit(self, record):
-        """
-        Emit a record.
+    _udp_reset = 0
 
-        The record is formatted, and then sent to the syslog server. If
-        exception information is present, it is NOT sent to the server.
-        """
+    def _custom_format(self, record):
         msg = self.format(record) + '\000'
         """
         We need to convert record level to lowercase, maybe this will
@@ -253,13 +251,23 @@ class SysLogHandler(logging.handlers.SysLogHandler):
         """
         prio = '<%d>' % self.encodePriority(self.facility,
                                             self.mapPriority(record.levelname))
+        msg = prio + msg
+        return msg
+
+    def emit(self, record):
+        """
+        Emit a record.
+
+        The record is formatted, and then sent to the syslog server. If
+        exception information is present, it is NOT sent to the server.
+        """
+        msg = self._custom_format(record)
         # Message is a string. Convert to bytes as required by RFC 5424
         if type(msg) is unicode:
             msg = msg.encode('utf-8')
             ## this puts BOM in wrong place
             #if codecs:
             #    msg = codecs.BOM_UTF8 + msg
-        msg = prio + msg
         try:
             if self.unixsocket:
                 try:
@@ -268,6 +276,11 @@ class SysLogHandler(logging.handlers.SysLogHandler):
                     self._connect_unixsocket(self.address)
                     self.socket.send(msg)
             elif self.socktype == socket.SOCK_DGRAM:
+                now = time.time()
+                if now - 1 > self._udp_reset:
+                    self.socket.close()
+                    self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    self._udp_reset = now
                 self.socket.sendto(msg, self.address)
             else:
                 self.socket.sendall(msg)
@@ -276,32 +289,17 @@ class SysLogHandler(logging.handlers.SysLogHandler):
         except:
             self.handleError(record)
 
-
-class SysLogHostnameHandler(logging.handlers.SysLogHandler):
+class SysLogHostnameHandler(SysLogHandler):
     """Slightly modified standard SysLogHandler - sends also hostname and service type"""
 
-    def emit(self, record):
+    def _custom_format(self, record):
         msg = self.format(record)
         format_string = '<%d> %s %s %s\000'
         msg = format_string % (self.encodePriority(self.facility,self.mapPriority(record.levelname)),
                                _hostname,
                                _service_name,
                                msg)
-        if type(msg) is unicode:
-            msg = msg.encode('utf-8')
-        try:
-            if self.unixsocket:
-                try:
-                    self.socket.send(msg)
-                except socket.error:
-                    self._connect_unixsocket(self.address)
-                    self.socket.send(msg)
-            else:
-                self.socket.sendto(msg, self.address)
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except:
-            self.handleError(record)
+        return msg
 
 try:
     from logging import LoggerAdapter

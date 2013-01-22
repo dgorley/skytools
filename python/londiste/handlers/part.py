@@ -2,14 +2,13 @@
 
 Parameters:
   key=COLUMN: column name to use for hashing
-  hashfunc=FUNCNAME: function to use for hashing. (default: partconf.get_hash_raw)
+  hashfunc=NAME: function to use for hashing (default: partconf.get_hash_raw)
   hashexpr=EXPR: full expression to use for hashing (deprecated)
   encoding=ENC: validate and fix incoming data (only utf8 supported atm)
 
 On root node:
 * Hash of key field will be added to ev_extra3.
   This is implemented by adding additional trigger argument:
-
         ev_extra3='hash='||partconf.get_hash_raw(key_column)
 
 On branch/leaf node:
@@ -41,7 +40,7 @@ class PartHandler(TableHandler):
         # primary key columns
         self.key = args.get('key')
         if self.key is None:
-            raise Exception('Specify key field as key agument')
+            raise Exception('Specify key field as key argument')
 
         # hash function & full expression
         hashfunc = args.get('hashfunc', self.DEFAULT_HASHFUNC)
@@ -60,7 +59,7 @@ class PartHandler(TableHandler):
         """Let trigger put hash into extra3"""
 
         arg = "ev_extra3='hash='||%s" % self.hashexpr
-        trigger_arg_list.append(arg)        
+        trigger_arg_list.append(arg)
         TableHandler.add(self, trigger_arg_list)
 
     def prepare_batch(self, batch_info, dst_curs):
@@ -81,15 +80,12 @@ class PartHandler(TableHandler):
         self.log.debug('part.process_event: my event, processing')
         TableHandler.process_event(self, ev, sql_queue_func, arg)
 
-    def real_copy(self, tablename, src_curs, dst_curs, column_list, cond_list):
-        """Copy only slots needed locally."""
+    def get_copy_condition(self, src_curs, dst_curs):
+        """Prepare the where condition for copy and replay filtering"""
         self.load_part_info(dst_curs)
         w = "(%s & %d) = %d" % (self.hashexpr, self.max_part, self.local_part)
         self.log.debug('part: copy_condition=%s' % w)
-        cond_list.append(w)
-
-        return TableHandler.real_copy(self, tablename, src_curs, dst_curs,
-                                     column_list, cond_list)
+        return w
 
     def load_part_info(self, curs):
         """Load slot info from database."""
@@ -101,4 +97,3 @@ class PartHandler(TableHandler):
 
 # register handler class
 __londiste_handlers__ = [PartHandler]
-
